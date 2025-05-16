@@ -1,6 +1,39 @@
+require('dotenv').config()
+
 const express = require('express')
 const morgan = require('morgan')
+const mongoose = require('mongoose')
 
+if (process.argv.length < 3) {
+    console.log('give password as argument')
+    process.exit(1)
+}
+
+const password = process.argv[2]
+
+const url =
+    `mongodb+srv://wyg:${password}@cluster0.3h93rmd.mongodb.net/noteApp?retryWrites=true&w=majority&appName=Cluster0`
+
+mongoose.set('strictQuery', false)
+
+mongoose.connect(url)
+
+const noteSchema = new mongoose.Schema({
+    content: {
+        type: String,
+        required: true,
+        minLength: 5
+    },
+    important: Boolean,
+})
+noteSchema.set('toJSON', {
+    transform: (document, returnedObject) => {
+        returnedObject.id = returnedObject._id.toString()
+        delete returnedObject._id
+        delete returnedObject.__v
+    }
+})
+const Note = mongoose.model('Note', noteSchema)
 
 const app = express()
 app.use(express.json())
@@ -46,43 +79,58 @@ app.get('/', (request, response) => {
 })
 
 app.get('/api/notes', (request, response) => {
-    response.json(notes)
+    Note.find({}).then(data => {
+        response.json(data)
+    })
 })
 
-app.get('/api/notes/:id', (request, response) => {
-    const id = Number(request.params.id)
-    const note = notes.find(n => n.id === id)
-    if (note) {
-        response.json(note)
-    } else {
-        response.status(404).end()
-    }
-})
-
-app.post('/api/notes', (request, response) => {
-    const body = request.body
-    if (!body.content) {
-        return response.status(400).json({
-            error: 'content is missing'
+app.get('/api/notes/:id', (request, response, next) => {
+    Note.findById(request.params.id).then(note => {
+        if (note) {
+            response.json(note)
+        } else {
+            response.status(404).end()
+        }
+    })
+        .catch(error => {
+            next(error)
         })
-    }
-    const maxId = notes.length === 0 ? 0 : Math.max(...notes.map(n => n.id))
-    const note = {
+})
+
+app.post('/api/notes', (request, response, next) => {
+    const body = request.body
+
+    const note = new Note({
         content: body.content,
         important: body.important || false,
-        date: new Date(),
-        id: maxId + 1
-    }
-    notes = notes.concat(note)
-
-    response.json(note)
+    })
+    note.save()
+        .then(data => {
+            response.json(data)
+        })
+        .catch(error => {
+            next(error)
+        })
 })
 app.delete('/api/notes/:id', (request, response) => {
     const id = Number(request.params.id)
     notes = notes.filter(n => n.id !== id)
     response.status(204).end()
 })
-
+app.put('/api/notes/:id', (req, res, next) => {
+    const body = req.body
+    const note = {
+        content: body.content,
+        important: body.important,
+    }
+    Note.findByIdAndUpdate(req.params.id, note, { new: true, runValidators: true, context: 'query' })
+        .then(data => {
+            res.json(data)
+        })
+        .catch(error => {
+            next(error)
+        })
+})
 let persons = [
     {
         "id": 1,
@@ -105,9 +153,35 @@ let persons = [
         "number": "39-23-6423122"
     }
 ]
-
+const peopleSchema = new mongoose.Schema({
+    name: {
+        type: String,
+        required: true,
+        minLength: 3,
+    },
+    number: {
+        type: String,
+        required: [true, '手机号码必填'],
+        validate: {
+            validator: function(v) {
+                return /\d+-\d+/.test(v)
+            },
+            message: props => `${props.value} 不是有效的手机号`
+        }
+    },
+})
+peopleSchema.set('toJSON', {
+    transform: (document, returnedObject) => {
+        returnedObject.id = returnedObject._id.toString()
+        delete returnedObject._id
+        delete returnedObject.__v
+    }
+})
+const People = mongoose.model('People', peopleSchema)
 app.get('/api/persons', (req, res) => {
-    res.json(persons)
+    People.find({}).then(data => {
+        res.json(data)
+    })
 })
 
 app.get('/info', (req, res) => {
@@ -116,63 +190,74 @@ ${new Date()}`
     res.header("Content-Type", "text/plain").end(msg)
 })
 
-app.get('/api/persons/:id', (req, res) => {
-    const id = Number(req.params.id)
-    const person = persons.find(p => p.id === id)
-    if (person) {
-        return res.json(person)
-    } else {
-        res.status(404).json({
-            message: 'person not found'
+app.get('/api/persons/:id', (req, res, next) => {
+    People.findById(req.params.id).then(person => {
+        if (person) {
+            return res.json(person)
+        } else {
+            res.status(404).json({
+                message: 'person not found'
+            })
+        }
+    })
+        .catch(error => {
+            next(error)
         })
-    }
 })
-app.post('/api/persons', (req, res) => {
-    console.log(req.path);
-
+app.post('/api/persons', (req, res, next) => {
     const body = req.body
-    if (!body.name || !body.number) {
-        return res.status(400).json({
-            error: "missing params"
+
+    const person = new People({
+        name: body.name,
+        number: body.number,
+    })
+    person.save().then(data => {
+        res.json(data)
+    })
+    .catch(error => {
+        next(error)
+    })
+})
+app.delete('/api/persons/:id', (req, res, next) => {
+    People.findByIdAndDelete(req.params.id)
+        .then(data => {
+            res.status(204).end()
         })
-    }
-    const findOne = persons.find(p => p.name === body.name)
-    if (findOne) {
-        return res.status(400).json({
-            error: "name already exist"
+        .catch(error => {
+            next(error)
         })
-    }
-    const id = Math.random() * 100000
+})
+app.put('/api/persons/:id', (req, res, error) => {
+    const body = req.body
     const person = {
         name: body.name,
         number: body.number,
-        id
     }
-    persons = persons.concat(person)
-    res.json(person)
-})
-app.delete('/api/persons/:id', (req, res) => {
-    const id = Number(req.params.id)
-    const person = persons.find(p => p.id === id)
-    if (!person) {
-        return res.status(404).json({
-            message: "person not found"
+    People.findByIdAndUpdate(req.params.id, person, { new: true, runValidators: true, context: 'query' })
+        .then(data => {
+            res.json(data)
         })
-    } else {
-        persons = persons.filter(p => p.id !== id)
-        res.status(204).json({
-            message: "delete success."
+        .catch(error => {
+            next(error)
         })
-    }
 })
-
 const unknownEndpoint = (request, response) => {
     response.status(404).send({ error: 'unknown endpoint' })
 }
-
 app.use(unknownEndpoint)
 
-const PORT = process.env.PORT || 3001
+const errorHandler = (error, req, res, next) => {
+    // console.log(error);
+    if (error.name === 'CastError') {
+        return res.status(400).send({ error: 'id 错误' })
+    } else if (error.name === 'ValidationError') {
+        return res.status(400).json({ error: error.message })
+    }
+    next(error)
+}
+app.use(errorHandler)
+
+const PORT = process.env.PORT
 
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`)

@@ -4,15 +4,8 @@ const express = require('express')
 const morgan = require('morgan')
 const mongoose = require('mongoose')
 
-if (process.argv.length < 3) {
-    console.log('give password as argument')
-    process.exit(1)
-}
-
-const password = process.argv[2]
-
-const url =
-    `mongodb+srv://wyg:${password}@cluster0.3h93rmd.mongodb.net/noteApp?retryWrites=true&w=majority&appName=Cluster0`
+const url = process.env.MONGODB_URI
+console.log('url', url);
 
 mongoose.set('strictQuery', false)
 
